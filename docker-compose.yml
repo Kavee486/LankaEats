@@ -1,0 +1,119 @@
+# Full local stack: docker compose up --build
+#   App UI + API gateway:   http://localhost:8080
+#   Traces / logs / metrics: http://localhost:18888   (.NET Aspire dashboard; OTLP on localhost:4317)
+#   RabbitMQ management:     http://localhost:15672   (guest / guest)
+
+x-dotnet-service: &dotnet-service
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    rabbitmq: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+x-common-env: &common-env
+  ASPNETCORE_ENVIRONMENT: Development
+  ConnectionStrings__rabbitmq: amqp://guest:guest@rabbitmq:5672
+  ConnectionStrings__redis: redis:6379
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://dashboard:18889
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  Jwt__SigningKey: ${JWT_SIGNING_KEY:-dev-only-signing-key-change-me-0123456789abcdef}
+
+services:
+  # ---------- infrastructure ----------
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports: ["5672:5672", "15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:9.5
+    environment:
+      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+    # 18888 = UI; 4317 = OTLP/gRPC for services run from the IDE
+    ports: ["18888:18888", "4317:18889"]
+
+  # ---------- services ----------
+  orders:
+    <<: *dotnet-service
+    build:
+      context: .
+      args: { PROJECT: src/Services/Orders/Orders.Api/Orders.Api.csproj, ASSEMBLY: Orders.Api }
+    image: lankaeats/orders:local
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: orders
+      ConnectionStrings__orders: Host=postgres;Database=orders;Username=postgres;Password=postgres;GSS Encryption Mode=Disable
+      Services__Inventory: http://inventory:8080
+
+  inventory:
+    <<: *dotnet-service
+    build:
+      context: .
+      args: { PROJECT: src/Services/Inventory/Inventory.Api/Inventory.Api.csproj, ASSEMBLY: Inventory.Api }
+    image: lankaeats/inventory:local
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: inventory
+      ConnectionStrings__inventory: Host=postgres;Database=inventory;Username=postgres;Password=postgres;GSS Encryption Mode=Disable
+
+  payments:
+    <<: *dotnet-service
+    build:
+      context: .
+      args: { PROJECT: src/Services/Payments/Payments.Api/Payments.Api.csproj, ASSEMBLY: Payments.Api }
+    image: lankaeats/payments:local
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: payments
+      ConnectionStrings__payments: Host=postgres;Database=payments;Username=postgres;Password=postgres;GSS Encryption Mode=Disable
+
+  notifications:
+    <<: *dotnet-service
+    build:
+      context: .
+      args: { PROJECT: src/Services/Notifications/Notifications.Api/Notifications.Api.csproj, ASSEMBLY: Notifications.Api }
+    image: lankaeats/notifications:local
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: notifications
+
+  gateway:
+    <<: *dotnet-service
+    build:
+      context: .
+      args: { PROJECT: src/Gateway/LankaEats.Gateway/LankaEats.Gateway.csproj, ASSEMBLY: LankaEats.Gateway }
+    image: lankaeats/gateway:local
+    ports: ["8080:8080"]
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: gateway
+      ReverseProxy__Clusters__orders__Destinations__primary__Address: http://orders:8080
+      ReverseProxy__Clusters__inventory__Destinations__primary__Address: http://inventory:8080
+      ReverseProxy__Clusters__payments__Destinations__primary__Address: http://payments:8080
+      ReverseProxy__Clusters__notifications__Destinations__primary__Address: http://notifications:8080
+
+volumes:
+  pgdata:

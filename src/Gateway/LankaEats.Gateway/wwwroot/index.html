@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LankaEats</title>
+  <style>
+    :root {
+      --bg: #faf7f2; --surface: #ffffff; --text: #2b2118; --muted: #7a6b5d; --border: #eadfd2;
+      --accent: #c2410c; --accent-soft: #fff1e6; --ok: #15803d; --ok-soft: #e8f6ec; --bad: #b91c1c; --bad-soft: #fdecec;
+      --info: #1d4ed8; --info-soft: #eaf0fe;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #17120e; --surface: #221b15; --text: #f3ebe2; --muted: #b3a597; --border: #3a2f25;
+        --accent: #fb923c; --accent-soft: #3a2414; --ok: #4ade80; --ok-soft: #12301d; --bad: #f87171; --bad-soft: #3a1717;
+        --info: #93b4ff; --info-soft: #18233d;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+      padding: 14px 20px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 2; }
+    .brand { font-weight: 700; font-size: 20px; } .brand span { color: var(--accent); }
+    main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; display: grid; gap: 20px; grid-template-columns: 1fr 360px; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    h2 { font-size: 16px; margin: 0 0 12px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .menu { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+    .item { display: flex; flex-direction: column; gap: 6px; }
+    .item .cat { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .item .name { font-weight: 600; } .item .desc { color: var(--muted); font-size: 13px; flex: 1; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .price { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .stock { font-size: 12px; color: var(--muted); }
+    button, select, input { font: inherit; color: inherit; }
+    button { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    input, select { border: 1px solid var(--border); background: var(--bg); border-radius: 8px; padding: 6px 10px; width: 100%; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+    .login { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .login input { width: 160px; } .login select { width: auto; }
+    .cart-line { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+    .total { display: flex; justify-content: space-between; font-weight: 700; margin-top: 10px; }
+    .orders { display: flex; flex-direction: column; gap: 10px; }
+    .order { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+    .order small { color: var(--muted); }
+    .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--info-soft); color: var(--info); }
+    .badge.Confirmed, .badge.Delivered, .badge.Preparing, .badge.OutForDelivery { background: var(--ok-soft); color: var(--ok); }
+    .badge.Rejected { background: var(--bad-soft); color: var(--bad); }
+    .flash { animation: flash 1.2s ease-out; }
+    @keyframes flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+    .muted { color: var(--muted); font-size: 13px; }
+    #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
+      padding: 10px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
+    #toast.show { opacity: 1; }
+    .live { font-size: 12px; color: var(--muted); } .live.on::before { content: "● "; color: var(--ok); }
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand">Lanka<span>Eats</span></div>
+  <div class="login" id="login">
+    <input id="name" placeholder="Your name" value="Nimal">
+    <select id="role"><option value="customer">Customer</option><option value="admin">Restaurant admin</option></select>
+    <button class="primary" id="loginBtn">Sign in (demo)</button>
+  </div>
+  <div class="login" id="whoami" hidden>
+    <span id="who"></span><span class="live" id="live">offline</span>
+    <button id="logoutBtn">Sign out</button>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Today's menu</h2>
+    <div class="menu" id="menu"><p class="muted">Loading menu…</p></div>
+  </section>
+
+  <aside style="display:flex;flex-direction:column;gap:20px">
+    <section class="card" id="cartCard">
+      <h2>Your order</h2>
+      <div id="cart"><p class="muted">Add something tasty from the menu.</p></div>
+      <div class="total"><span>Total</span><span id="total">LKR 0</span></div>
+      <label for="address">Delivery address</label>
+      <input id="address" value="42 Galle Road, Colombo 03">
+      <label for="payment">Payment</label>
+      <select id="payment">
+        <option value="card">Card</option>
+        <option value="cash_on_delivery">Cash on delivery</option>
+        <option value="test_declined_card">Test card (always declined)</option>
+      </select>
+      <p class="muted">Card payments over LKR 25,000 are declined by the simulator. Fish Ambul Thiyal has only 5 in stock, so you can try selling it out.</p>
+      <button class="primary" id="placeBtn" style="width:100%" disabled>Sign in to order</button>
+    </section>
+
+    <section class="card">
+      <h2 id="ordersTitle">Live orders</h2>
+      <div class="orders" id="orders"><p class="muted">Sign in to see orders update in real time.</p></div>
+    </section>
+  </aside>
+</main>
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const lkr = (n) => "LKR " + Number(n).toLocaleString("en-LK", { maximumFractionDigits: 2 });
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const store = {
+    get() { try { return JSON.parse(sessionStorage.getItem("lankaeats-session")); } catch { return null; } },
+    set(v) { try { v ? sessionStorage.setItem("lankaeats-session", JSON.stringify(v)) : sessionStorage.removeItem("lankaeats-session"); } catch {} },
+  };
+
+  let session = store.get();
+  let menu = [];
+  const cart = new Map();
+  let hub = null;
+
+  function toast(msg) {
+    const t = $("toast"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 3500);
+  }
+
+  async function api(path, options = {}) {
+    const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+    if (session) headers.Authorization = "Bearer " + session.accessToken;
+    const res = await fetch(path, { ...options, headers });
+    if (res.status === 401) { logout(); throw new Error("Session expired, please sign in again."); }
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { const p = await res.json(); detail = p.detail || p.title || detail;
+        if (p.errors) detail += ": " + Object.values(p.errors).flat().join(" "); } catch {}
+      throw new Error(detail);
+    }
+    return res.status === 204 ? null : res.json();
+  }
+
+  async function loadMenu() {
+    menu = await api("/api/menu");
+    $("menu").innerHTML = menu.map((i) => `
+      <div class="card item">
+        <div class="cat">${esc(i.category)}</div>
+        <div class="name">${esc(i.name)}</div>
+        <div class="desc">${esc(i.description)}</div>
+        <div class="row"><span class="price">${lkr(i.price)}</span><span class="stock">${i.isAvailable ? i.availableQuantity + " left" : "Sold out"}</span></div>
+        <button data-add="${i.id}" ${i.isAvailable ? "" : "disabled"}>Add</button>
+      </div>`).join("");
+  }
+
+  function renderCart() {
+    if (cart.size === 0) { $("cart").innerHTML = '<p class="muted">Add something tasty from the menu.</p>'; }
+    else {
+      $("cart").innerHTML = [...cart].map(([id, qty]) => {
+        const item = menu.find((m) => m.id === id);
+        return `<div class="cart-line"><span>${qty} × ${esc(item?.name)}</span>
+          <span>${lkr((item?.price || 0) * qty)} <button data-remove="${id}" aria-label="Remove">−</button></span></div>`;
+      }).join("");
+    }
+    const total = [...cart].reduce((s, [id, q]) => s + (menu.find((m) => m.id === id)?.price || 0) * q, 0);
+    $("total").textContent = lkr(total);
+    $("placeBtn").disabled = !session || cart.size === 0 || session.role === "admin";
+    $("placeBtn").textContent = !session ? "Sign in to order" : session.role === "admin" ? "Admins don't order" : "Place order";
+  }
+
+  async function loadOrders(highlightId) {
+    if (!session) return;
+    const orders = await api("/api/orders?take=20");
+    const admin = session.role === "admin";
+    $("ordersTitle").textContent = admin ? "Restaurant dashboard (all orders)" : "Your orders (live)";
+    $("orders").innerHTML = orders.length === 0 ? '<p class="muted">No orders yet.</p>' : orders.map((o) => `
+      <div class="order ${o.id === highlightId ? "flash" : ""}">
+        <div class="row"><strong>${lkr(o.total)}</strong><span class="badge ${esc(o.status)}">${esc(o.status)}</span></div>
+        <small>${o.lines.map((l) => `${l.quantity}× ${esc(l.name)}`).join(", ")}</small><br>
+        <small>${admin ? esc(o.customerId) + " · " : ""}${new Date(o.createdAt).toLocaleTimeString()} · ${esc(o.paymentMethod)}</small>
+        ${o.rejectionReason ? `<br><small style="color:var(--bad)">${esc(o.rejectionReason)}</small>` : ""}
+        ${admin && ["Confirmed", "Preparing", "OutForDelivery"].includes(o.status) ? `<div style="margin-top:6px"><button data-advance="${o.id}">Advance ▸</button></div>` : ""}
+      </div>`).join("");
+  }
+
+  async function connectHub() {
+    hub = new signalR.HubConnectionBuilder()
+      .withUrl("/hubs/orders", { accessTokenFactory: () => session.accessToken })
+      .withAutomaticReconnect()
+      .build();
+    hub.on("OrderStatusChanged", async (n) => {
+      toast(`Order ${n.orderId.slice(-6)} → ${n.status}${n.reason ? " (" + n.reason + ")" : ""}`);
+      await Promise.all([loadOrders(n.orderId), loadMenu()]);
+      renderCart();
+    });
+    const setLive = (on) => { $("live").textContent = on ? "live" : "reconnecting…"; $("live").classList.toggle("on", on); };
+    hub.onreconnecting(() => setLive(false));
+    hub.onreconnected(() => { setLive(true); loadOrders(); });
+    await hub.start(); setLive(true);
+  }
+
+  function showSession() {
+    $("login").hidden = !!session; $("whoami").hidden = !session;
+    if (session) $("who").textContent = `${session.displayName} (${session.role})`;
+    renderCart();
+  }
+
+  async function login() {
+    try {
+      const res = await fetch("/auth/demo-token", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName: $("name").value, role: $("role").value }) });
+      if (!res.ok) throw new Error("Login failed");
+      session = await res.json(); store.set(session);
+      showSession(); await connectHub(); await loadOrders();
+    } catch (e) { toast(e.message); }
+  }
+
+  function logout() {
+    session = null; store.set(null);
+    if (hub) { hub.stop(); hub = null; }
+    $("orders").innerHTML = '<p class="muted">Sign in to see orders update in real time.</p>';
+    showSession();
+  }
+
+  document.addEventListener("click", async (e) => {
+    const t = e.target.closest("button"); if (!t) return;
+    if (t.dataset.add) { cart.set(t.dataset.add, (cart.get(t.dataset.add) || 0) + 1); renderCart(); }
+    if (t.dataset.remove) { const q = cart.get(t.dataset.remove) - 1; q > 0 ? cart.set(t.dataset.remove, q) : cart.delete(t.dataset.remove); renderCart(); }
+    if (t.dataset.advance) { try { await api(`/api/orders/${t.dataset.advance}/advance`, { method: "POST" }); } catch (err) { toast(err.message); } }
+  });
+
+  $("loginBtn").onclick = login;
+  $("logoutBtn").onclick = logout;
+  $("placeBtn").onclick = async () => {
+    $("placeBtn").disabled = true;
+    try {
+      const order = await api("/api/orders", { method: "POST", body: JSON.stringify({
+        deliveryAddress: $("address").value, paymentMethod: $("payment").value,
+        items: [...cart].map(([menuItemId, quantity]) => ({ menuItemId, quantity })) }) });
+      cart.clear(); toast("Order placed. Watch it move through the pipeline."); await loadOrders(order.id);
+    } catch (e) { toast(e.message); }
+    renderCart();
+  };
+
+  (async () => {
+    try { await loadMenu(); } catch (e) { $("menu").innerHTML = `<p class="muted">Menu unavailable: ${esc(e.message)}</p>`; }
+    showSession();
+    if (session) { try { await connectHub(); await loadOrders(); } catch { logout(); } }
+  })();
+</script>
+</body>
+</html>

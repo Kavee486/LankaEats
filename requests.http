@@ -1,0 +1,75 @@
+### LankaEats API walkthrough (VS Code REST Client / Rider / Visual Studio)
+@gateway = http://localhost:8080
+
+### 1. Get a demo token (customer)
+# @name login
+POST {{gateway}}/auth/demo-token
+Content-Type: application/json
+
+{ "displayName": "Nimal", "role": "customer" }
+
+###
+@token = {{login.response.body.accessToken}}
+
+### 2. Browse the menu (anonymous, served from Redis-backed HybridCache)
+GET {{gateway}}/api/menu
+
+### 3. Place an order (card) -> Pending -> StockReserved -> Confirmed
+# @name order
+POST {{gateway}}/api/orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "deliveryAddress": "42 Galle Road, Colombo 03",
+  "paymentMethod": "card",
+  "items": [
+    { "menuItemId": "0199a000-0000-7000-8000-000000000001", "quantity": 2 },
+    { "menuItemId": "0199a000-0000-7000-8000-000000000007", "quantity": 1 }
+  ]
+}
+
+### 4. Check the order (repeat to watch the status change)
+GET {{gateway}}/api/orders/{{order.response.body.id}}
+Authorization: Bearer {{token}}
+
+### 5. Payment record
+GET {{gateway}}/api/payments/{{order.response.body.id}}
+Authorization: Bearer {{token}}
+
+### 6. Compensation path: declined card -> Rejected, stock released
+POST {{gateway}}/api/orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "deliveryAddress": "Kandy",
+  "paymentMethod": "test_declined_card",
+  "items": [{ "menuItemId": "0199a000-0000-7000-8000-000000000006", "quantity": 3 }]
+}
+
+### 7. Sold out path: only 5 Fish Ambul Thiyal in stock
+POST {{gateway}}/api/orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "deliveryAddress": "Galle Fort",
+  "paymentMethod": "card",
+  "items": [{ "menuItemId": "0199a000-0000-7000-8000-000000000006", "quantity": 6 }]
+}
+
+### 8. My orders
+GET {{gateway}}/api/orders
+Authorization: Bearer {{token}}
+
+### 9. Admin token
+# @name admin
+POST {{gateway}}/auth/demo-token
+Content-Type: application/json
+
+{ "displayName": "Kitchen", "role": "admin" }
+
+### 10. Advance an order: Confirmed -> Preparing -> OutForDelivery -> Delivered
+POST {{gateway}}/api/orders/{{order.response.body.id}}/advance
+Authorization: Bearer {{admin.response.body.accessToken}}

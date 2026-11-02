@@ -1,0 +1,9 @@
+**/bin
+**/obj
+**/.vs
+**/TestResults
+.git
+.github
+tests
+deploy
+docs

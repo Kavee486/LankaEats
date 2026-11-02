@@ -1,0 +1,64 @@
+name: Deploy to Azure
+
+# Manual trigger, so a push never spends cloud credit by accident.
+on:
+  workflow_dispatch:
+    inputs:
+      imageTag:
+        description: Image tag to deploy (commit SHA or "latest")
+        required: true
+        default: latest
+      minReplicas:
+        description: Minimum replicas per app (0 = scale to zero)
+        required: true
+        default: "0"
+
+permissions:
+  id-token: write # OIDC federated login: no long-lived Azure secret stored in GitHub
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep
+        id: deploy
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          url=$(az deployment group create \
+            --resource-group "$RG" \
+            --template-file deploy/azure/main.bicep \
+            --parameters registry="ghcr.io/$owner" \
+                         imageTag="${{ inputs.imageTag }}" \
+                         minReplicas=${{ inputs.minReplicas }} \
+                         ordersDb="${{ secrets.ORDERS_DB }}" \
+                         inventoryDb="${{ secrets.INVENTORY_DB }}" \
+                         paymentsDb="${{ secrets.PAYMENTS_DB }}" \
+                         rabbitmqUrl="${{ secrets.RABBITMQ_URL }}" \
+                         redisConnection="${{ secrets.REDIS_CONNECTION }}" \
+                         jwtSigningKey="${{ secrets.JWT_SIGNING_KEY }}" \
+                         otlpEndpoint="${{ vars.OTLP_ENDPOINT }}" \
+                         otlpHeaders="${{ secrets.OTLP_HEADERS }}" \
+            --query properties.outputs.gatewayUrl.value -o tsv)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "### Deployed: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS "${{ steps.deploy.outputs.url }}/health/ready"; then exit 0; fi
+            sleep 15
+          done
+          exit 1

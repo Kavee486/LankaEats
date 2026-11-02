@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    name: Build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
+
+      - run: dotnet restore
+      - run: dotnet build --no-restore -c Release
+
+      - name: Unit tests
+        run: dotnet test tests/Orders.UnitTests --no-build -c Release --logger trx --collect:"XPlat Code Coverage" --results-directory TestResults
+
+      # GitHub-hosted Ubuntu runners have Docker, so Testcontainers works without any setup.
+      - name: Integration tests (Testcontainers - PostgreSQL + RabbitMQ)
+        run: dotnet test tests/Orders.IntegrationTests --no-build -c Release --logger trx --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults
+
+  images:
+    name: Docker image (${{ matrix.service.name }})
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { name: orders, project: src/Services/Orders/Orders.Api/Orders.Api.csproj, assembly: Orders.Api }
+          - { name: inventory, project: src/Services/Inventory/Inventory.Api/Inventory.Api.csproj, assembly: Inventory.Api }
+          - { name: payments, project: src/Services/Payments/Payments.Api/Payments.Api.csproj, assembly: Payments.Api }
+          - { name: notifications, project: src/Services/Notifications/Notifications.Api/Notifications.Api.csproj, assembly: Notifications.Api }
+          - { name: gateway, project: src/Gateway/LankaEats.Gateway/LankaEats.Gateway.csproj, assembly: LankaEats.Gateway }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # GitHub Container Registry is free for public images.
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/lankaeats-${{ matrix.service.name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: |
+            PROJECT=${{ matrix.service.project }}
+            ASSEMBLY=${{ matrix.service.assembly }}
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+            ${{ steps.image.outputs.name }}:latest
+          cache-from: type=gha,scope=${{ matrix.service.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}
